@@ -64,13 +64,196 @@ const getReviewerName = (review: Review) => {
   );
 };
 
+const DESCRIPTION_SECTION_HEADINGS = [
+  "Traditional Benefits",
+  "Who Should Wear",
+  "How to Wear",
+  "Do’s",
+  "Do's",
+  "Dos",
+  "Don’ts",
+  "Don'ts",
+  "Donts",
+  "Benefits",
+  "Wearing Method",
+  "Care Instructions",
+];
+
+const DESCRIPTION_ITEM_STARTERS = [
+  "Believed",
+  "Traditionally",
+  "Said",
+  "People",
+  "Meditation",
+  "Those",
+  "Business",
+  "Working",
+  "Wear",
+  "Commonly",
+  "Can",
+  "Keep",
+  "Store",
+  "Remove",
+  "Avoid",
+  "Do not",
+];
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+const stripUnsafeHtml = (html: string) => {
+  return html
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, "")
+    .replace(/<iframe[\s\S]*?>[\s\S]*?<\/iframe>/gi, "")
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/\s(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi, "")
+    .replace(/<\/?(?!h2\b|h3\b|h4\b|p\b|ul\b|ol\b|li\b|br\b|strong\b|b\b|em\b|i\b)[^>]+>/gi, "")
+    .replace(/<(h2|h3|h4|p|ul|ol|li|br|strong|b|em|i)(?:\s+[^>]*)?>/gi, "<$1>");
+};
+
+const looksLikeHtml = (value: string) => /<\/?[a-z][\s\S]*>/i.test(value);
+
+const normalizeHeading = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[’']/g, "'")
+    .replace(/:$/, "")
+    .trim();
+
+const splitDescriptionItems = (content: string) => {
+  const cleaned = content
+    .replace(/\r?\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned) return [];
+
+  const bulletParts = cleaned
+    .split(/\s*(?:•|-|\*)\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (bulletParts.length > 1) return bulletParts;
+
+  const starterPattern = DESCRIPTION_ITEM_STARTERS
+    .map((starter) => starter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+
+  return cleaned
+    .split(new RegExp(`\\s+(?=${starterPattern}\\b)`, "g"))
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+const plainTextDescriptionToHtml = (description: string) => {
+  const raw = description.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
+
+  if (!raw) return "<p>No description available.</p>";
+
+  const headingMatches = DESCRIPTION_SECTION_HEADINGS
+    .map((heading) => {
+      const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const match = raw.match(new RegExp(`\\b${escapedHeading}\\b`, "i"));
+
+      return match?.index !== undefined
+        ? {
+            heading,
+            index: match.index,
+            length: match[0].length,
+          }
+        : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a!.index - b!.index) as Array<{
+      heading: string;
+      index: number;
+      length: number;
+    }>;
+
+  if (!headingMatches.length) {
+    return `<p>${escapeHtml(raw)}</p>`;
+  }
+
+  let html = "";
+
+  headingMatches.forEach((section, index) => {
+    const nextSection = headingMatches[index + 1];
+
+    const sectionTitle =
+      normalizeHeading(section.heading) === "dos"
+        ? "Do’s"
+        : normalizeHeading(section.heading) === "donts"
+        ? "Don’ts"
+        : section.heading;
+
+    const contentStart = section.index + section.length;
+    const contentEnd = nextSection ? nextSection.index : raw.length;
+    const content = raw.slice(contentStart, contentEnd).trim();
+
+    const items = splitDescriptionItems(content);
+
+    html += `<h3>${escapeHtml(sectionTitle)}</h3>`;
+
+    if (items.length) {
+      html += "<ul>";
+      items.forEach((item) => {
+        html += `<li>${escapeHtml(item)}</li>`;
+      });
+      html += "</ul>";
+    }
+  });
+
+  return html;
+};
+
+const buildDescriptionHtml = (description?: string) => {
+  const raw = String(description || "").trim();
+
+  if (!raw) {
+    return "<p>No description available.</p>";
+  }
+
+  if (looksLikeHtml(raw)) {
+    return stripUnsafeHtml(raw);
+  }
+
+  return plainTextDescriptionToHtml(raw);
+};
+
+function ProductDescription({ description }: { description?: string }) {
+  const html = useMemo(() => buildDescriptionHtml(description), [description]);
+
+  return (
+    <div
+      className="
+        font-jost text-[15px] leading-8 text-black sm:text-base
+        [&_h2]:mb-4 [&_h2]:mt-7 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-black
+        [&_h3]:mb-3 [&_h3]:mt-6 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-black
+        [&_h4]:mb-3 [&_h4]:mt-6 [&_h4]:text-base [&_h4]:font-semibold [&_h4]:text-black
+        [&_p]:mb-4 [&_p]:text-black
+        [&_ul]:mb-5 [&_ul]:list-disc [&_ul]:pl-8
+        [&_ol]:mb-5 [&_ol]:list-decimal [&_ol]:pl-8
+        [&_li]:mb-1.5 [&_li]:pl-1 [&_li]:text-black
+        [&_strong]:font-semibold [&_b]:font-semibold
+      "
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
 export default function ProductDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const { addToCart } = useCart();
 
   const [product, setProduct] = useState<Product | null>(null);
   const [related, setRelated] = useState<Product[]>([]);
-  const [reviews, setReviews] = useState<Review[]>([]);
+  // const [reviews, setReviews] = useState<Review[]>([]);
   const [summary, setSummary] = useState<ReviewSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,12 +262,15 @@ export default function ProductDetailPage() {
   const [selectedVariant, setSelectedVariant] = useState<
     { label: string; value: string } | undefined
   >();
-  const [activeTab, setActiveTab] = useState<
-    "description" | "short-description" | "specs" | "reviews"
-  >("description");
+ type ProductTab = "description" | "short-description" | "specs";
+
+const [activeTab, setActiveTab] = useState<ProductTab>("description");
 
   useEffect(() => {
     if (!slug) return;
+
+    setLoading(true);
+    setError(null);
 
     productApi
       .get(slug)
@@ -112,44 +298,40 @@ export default function ProductDetailPage() {
   }, [slug]);
 
   const images = useMemo(() => {
-  if (!product) return [];
+    if (!product) return [];
 
-  const productImages = getUniqueImages(
-    (product.images || [])
-      .map(
-        (image) =>
-          image?.variants?.productDetail ||
-          image?.variants?.original ||
-          image?.url
-      )
-      .filter(isImageUrl)
-  );
+    const productImages = getUniqueImages(
+      (product.images || [])
+        .map(
+          (image) =>
+            image?.url ||
+            image?.variants?.original ||
+            image?.variants?.productDetail
+        )
+        .filter(isImageUrl)
+    );
 
-  if (productImages.length > 0) {
-    return productImages;
-  }
+    if (productImages.length > 0) {
+      return productImages;
+    }
 
-  return getUniqueImages(
-    [
-      product.primaryImageData?.variants?.productDetail ||
-        product.primaryImageData?.variants?.original ||
-        product.primaryImageData?.url ||
+    return getUniqueImages(
+      [
+        product.primaryImageData?.url,
+        product.primaryImageData?.variants?.original,
+        product.primaryImageData?.variants?.productDetail,
         product.primaryImage,
+        product.featuredImage,
+        product.thumbnail,
+        ...(product.galleryImages || []),
+      ].filter(isImageUrl)
+    );
+  }, [product]);
 
-      ...(product.galleryImages || []),
+  const safeActiveImage =
+    images.length > 0 && activeImage < images.length ? activeImage : 0;
 
-      product.featuredImage,
-      product.thumbnail,
-    ].filter(isImageUrl)
-  );
-}, [product]);
-
-const safeActiveImage =
-  images.length > 0 && activeImage < images.length ? activeImage : 0;
-
-// const activeImageSrc = images[safeActiveImage] || "";
-
- 
+  const activeImageSrc = images[safeActiveImage] || "";
 
   if (loading) {
     return (
@@ -182,14 +364,16 @@ const safeActiveImage =
     product.effectivePrice ??
     (product.salePrice > 0 ? product.salePrice : product.basePrice);
 
-  const activeImageSrc = images[activeImage] || "";
-
   const handleAddToCart = async () => {
     await addToCart(product._id, qty, selectedVariant);
   };
 
   const specs = product.specifications as Record<string, string> | undefined;
-
+const productTabs: Array<{ key: ProductTab; label: string }> = [
+  { key: "description", label: "Description" },
+  { key: "short-description", label: "Short Description" },
+  { key: "specs", label: "Specifications" },
+];
   return (
     <div className="min-h-screen bg-stone-50">
       {/* Breadcrumb */}
@@ -233,6 +417,7 @@ const safeActiveImage =
                   alt={product.name}
                   fill
                   className="object-contain"
+                  unoptimized
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-6xl sm:text-8xl">
@@ -250,6 +435,7 @@ const safeActiveImage =
                       )
                     }
                     className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-1.5 shadow transition-all hover:bg-white sm:left-3 sm:p-2"
+                    aria-label="Previous product image"
                   >
                     <ChevronLeft className="h-4 w-4 text-stone-700 sm:h-5 sm:w-5" />
                   </button>
@@ -260,6 +446,7 @@ const safeActiveImage =
                       setActiveImage((i) => (i + 1) % images.length)
                     }
                     className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-1.5 shadow transition-all hover:bg-white sm:right-3 sm:p-2"
+                    aria-label="Next product image"
                   >
                     <ChevronRight className="h-4 w-4 text-stone-700 sm:h-5 sm:w-5" />
                   </button>
@@ -276,16 +463,18 @@ const safeActiveImage =
                     type="button"
                     onClick={() => setActiveImage(i)}
                     className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border-2 transition-all sm:h-20 sm:w-20 ${
-                      i === activeImage
+                      i === safeActiveImage
                         ? "border-amber-600"
                         : "border-amber-100 hover:border-amber-300"
                     }`}
+                    aria-label={`View product image ${i + 1}`}
                   >
                     <Image
                       src={img}
                       alt={`${product.name} ${i + 1}`}
                       fill
                       className="object-cover"
+                      unoptimized
                     />
                   </button>
                 ))}
@@ -341,7 +530,7 @@ const safeActiveImage =
               </div>
             )}
 
-            {product.variants.length > 0 && (
+            {product.variants?.length > 0 && (
               <div className="mb-5 sm:mb-6">
                 <p className="mb-2 font-jost text-sm text-stone-500">Style:</p>
 
@@ -375,6 +564,7 @@ const safeActiveImage =
                 type="button"
                 onClick={() => setQty((q) => Math.max(1, q - 1))}
                 className="flex-1 py-2 text-lg"
+                aria-label="Decrease quantity"
               >
                 −
               </button>
@@ -387,6 +577,7 @@ const safeActiveImage =
                 type="button"
                 onClick={() => setQty((q) => Math.min(product.stock, q + 1))}
                 className="flex-1 py-2 text-lg"
+                aria-label="Increase quantity"
               >
                 +
               </button>
@@ -411,123 +602,99 @@ const safeActiveImage =
         </div>
 
         {/* Tabs */}
-        <div className="mb-10 sm:mb-12">
-          <div className="mb-5 flex gap-0.5 overflow-x-auto border-b border-amber-100 scrollbar-hide sm:mb-6">
-            {(["description", "short-description", "specs", "reviews"] as const).map(
-              (tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveTab(tab)}
-                  className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2.5 font-jost text-xs font-medium capitalize transition-all sm:px-5 sm:py-3 sm:text-sm ${
-                    activeTab === tab
-                      ? "border-amber-700 text-amber-800"
-                      : "border-transparent text-stone-500 hover:text-stone-800"
-                  }`}
-                >
-                  {tab === "reviews"
-                    ? `Reviews (${reviews.length})`
-                    : tab === "specs"
-                    ? "Specifications"
-                    : tab === "short-description"
-                    ? "Short Description"
-                    : "Description"}
-                </button>
-              )
-            )}
-          </div>
+              {/* Tabs */}
+<div className="mb-10 sm:mb-12">
+ <div className="mb-5 flex gap-0.5 overflow-x-auto border-b border-amber-100 scrollbar-hide sm:mb-6">
+  {productTabs.map((tab) => (
+    <button
+      key={tab.key}
+      type="button"
+      onClick={() => setActiveTab(tab.key)}
+      className={`shrink-0 border-b-2 px-4 py-3 font-jost text-sm font-medium transition-colors ${
+        activeTab === tab.key
+          ? "border-amber-800 text-amber-800"
+          : "border-transparent text-stone-500 hover:text-amber-700"
+      }`}
+    >
+      {tab.label}
+    </button>
+  ))}
+</div>
+{activeTab === "description" && (
+  <div className="rounded-2xl border border-stone-200 bg-white p-5 sm:p-7">
+    <ProductDescription description={product.description} />
+  </div>
+)}
 
-         {activeTab === "description" && (
-  <div
-    className="prose prose-sm max-w-none font-jost prose-stone sm:prose-base
-      prose-h2:mb-3 prose-h2:text-2xl prose-h2:font-semibold prose-h2:text-black
-      prose-h3:mb-2 prose-h3:mt-5 prose-h3:text-base prose-h3:font-semibold prose-h3:text-black
-      prose-p:my-2 prose-p:leading-relaxed prose-p:text-black
-      prose-ul:my-2 prose-ul:list-disc prose-ul:pl-8
-      prose-li:my-1 prose-li:text-black"
-  >
-    {product.description ? (
-      <div dangerouslySetInnerHTML={{ __html: product.description }} />
+{activeTab === "short-description" && (
+  <div className="rounded-2xl border border-stone-200 bg-white p-5 sm:p-7">
+    <ProductDescription description={product.shortDescription} />
+  </div>
+)}
+
+{activeTab === "specs" && (
+  <div className="rounded-2xl border border-stone-200 bg-white p-5 font-jost text-sm text-stone-600 sm:p-7">
+    {specs && Object.keys(specs).length > 0 ? (
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {Object.entries(specs).map(([key, value]) => (
+          <div
+            key={key}
+            className="flex justify-between gap-4 border-b border-stone-100 py-3"
+          >
+            <span className="font-medium capitalize text-stone-800">
+              {key.replace(/([A-Z])/g, " $1").replace(/_/g, " ")}
+            </span>
+
+            <span className="text-right text-stone-600">
+              {String(value || "-")}
+            </span>
+          </div>
+        ))}
+      </div>
     ) : (
-      <p className="text-stone-400">No description available.</p>
+      <p className="text-stone-400">No specifications available.</p>
     )}
   </div>
 )}
 
-          {activeTab === "short-description" && (
-            <div className="prose prose-sm max-w-none font-jost leading-relaxed text-stone-600 prose-stone sm:prose-base">
-              {product.shortDescription ? (
-                <div
-                  dangerouslySetInnerHTML={{ __html: product.shortDescription }}
-                />
-              ) : (
-                <p className="text-stone-400">
-                  No short description available.
-                </p>
-              )}
-            </div>
-          )}
-
-          {activeTab === "specs" && (
-            <div className="font-jost text-sm text-stone-600">
-              {specs && Object.keys(specs).length > 0 ? (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {Object.entries(specs).map(([key, value]) => (
-                    <div
-                      key={key}
-                      className="flex justify-between gap-4 border-b border-stone-100 py-3"
-                    >
-                      <span className="font-medium capitalize text-stone-800">
-                        {key}
-                      </span>
-                      <span className="text-right text-stone-600">{value}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-stone-400">No specifications available.</p>
-              )}
-            </div>
-          )}
-
-          {activeTab === "reviews" && (
-            <div className="font-jost text-sm text-stone-600">
-              {summary && (
-                <div className="mb-5 rounded-xl border border-stone-100 bg-white p-4">
-                  <p className="font-medium text-stone-800">
-                    Average Rating: {summary.averageRating || 0}
-                  </p>
-                  <p className="text-stone-500">
-                    Total Reviews: {summary.totalReviews || reviews.length}
-                  </p>
-                </div>
-              )}
-
-              {reviews.length > 0 ? (
-                <div className="space-y-4">
-                {reviews.map((review) => (
-                  <div
-                    key={review._id}
-                    className="rounded-xl border border-stone-100 bg-white p-4"
-                  >
-                    <p className="font-medium text-stone-800">
-                      {getReviewerName(review)}
-                    </p>
-
-                    <p className="mt-1 text-amber-700">
-                      {"★".repeat(review.rating)}
-                    </p>
-
-                    <p className="mt-2 text-stone-600">{review.comment}</p>
-                  </div>
-                ))}
-                </div>
-              ) : (
-                <p className="text-stone-400">No reviews yet.</p>
-              )}
-            </div>
-          )}
+  {/* {activeTab === "reviews" && (
+    <div className="rounded-2xl border border-stone-200 bg-white p-5 font-jost text-sm text-stone-600 sm:p-7">
+      {summary && (
+        <div className="mb-5 rounded-xl border border-stone-100 bg-white p-4">
+          <p className="font-medium text-stone-800">
+            Average Rating: {summary.averageRating || 0}
+          </p>
+          <p className="text-stone-500">
+            Total Reviews: {summary.totalReviews || reviews.length}
+          </p>
         </div>
+      )}
+
+      {reviews.length > 0 ? (
+        <div className="space-y-4">
+          {reviews.map((review) => (
+            <div
+              key={review._id}
+              className="rounded-xl border border-stone-100 bg-white p-4"
+            >
+              <p className="font-medium text-stone-800">
+                {getReviewerName(review)}
+              </p>
+
+              <p className="mt-1 text-amber-700">
+                {"★".repeat(review.rating)}
+              </p>
+
+              <p className="mt-2 text-stone-600">{review.comment}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-stone-400">No reviews yet.</p>
+      )}
+    </div>
+  )} */}
+</div>
 
         {/* Related Products */}
         {related.length > 0 && (

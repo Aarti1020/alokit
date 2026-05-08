@@ -25,6 +25,8 @@ const productPopulate = [
   { path: "subCategory", select: "name slug category" }
 ];
 
+const isDevelopment = process.env.NODE_ENV !== "production";
+
 export const getProductStockState = (product = {}) => {
   const stock = Number(product.stock) || 0;
   const lowStockThreshold = Number(product.lowStockThreshold) || 0;
@@ -44,16 +46,8 @@ export const getProductStockState = (product = {}) => {
 export const buildPublicProductFilter = (overrides = {}) => ({
   status: "active",
   isDeleted: false,
-  $or: [
-    { featuredImage: { $exists: true, $ne: "" } },
-    { thumbnail: { $exists: true, $ne: "" } },
-    { "images.0.url": { $exists: true, $ne: "" } },
-    { "galleryImages.0": { $exists: true, $ne: "" } }
-  ],
   ...overrides
 });
-
-const publicImageAvailabilityFilter = buildPublicProductFilter().$or;
 
 export const serializeProduct = (product, options = {}) => {
   const baseUrl = options.baseUrl || "";
@@ -143,6 +137,52 @@ const normalizeStringArray = (value) => {
 };
 
 const buildImageAltTexts = (value) => normalizeStringArray(value).map((alt) => sanitizeString(alt));
+
+const parseDeletedImages = (value) => {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeString(item || "")).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed)
+        ? parsed.map((item) => sanitizeString(item || "")).filter(Boolean)
+        : [];
+    } catch {
+      return value
+        .split(",")
+        .map((item) => sanitizeString(item || ""))
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+};
+
+const imageMatchesDeletedIdentifier = (image = {}, deletedIdentifiers = []) => {
+  const imageUrl = sanitizeString(image.url || "");
+  const publicId = sanitizeString(image.publicId || "");
+
+  return deletedIdentifiers.some((identifier) => {
+    const value = sanitizeString(identifier || "");
+
+    if (!value) {
+      return false;
+    }
+
+    return (
+      value === imageUrl ||
+      value === publicId ||
+      Boolean(imageUrl && value.endsWith(imageUrl)) ||
+      Boolean(imageUrl && imageUrl.endsWith(value))
+    );
+  });
+};
 
 const getProductAssetIds = (product) =>
   getProductMediaPublicIds(product);
@@ -559,6 +599,37 @@ const validatePricing = (basePrice, salePrice) => {
   }
 };
 
+const warnDuplicateProductSlugs = (products = [], context = "products") => {
+  if (!isDevelopment) {
+    return;
+  }
+
+  const seenSlugs = new Map();
+
+  products.forEach((product) => {
+    const slug = sanitizeString(product?.slug || "");
+
+    if (!slug) {
+      console.warn(`[product] Missing slug detected in ${context}`, {
+        productId: String(product?._id || ""),
+        name: product?.name || product?.title || ""
+      });
+      return;
+    }
+
+    if (seenSlugs.has(slug)) {
+      console.warn(`[product] Duplicate slug detected in ${context}`, {
+        slug,
+        firstProductId: String(seenSlugs.get(slug)),
+        duplicateProductId: String(product?._id || "")
+      });
+      return;
+    }
+
+    seenSlugs.set(slug, product?._id);
+  });
+};
+
 const resolveUniqueProductSlug = async (slug, excludedProductId = null) => {
   const baseSlug = makeSlug(slug || "product");
   let nextSlug = baseSlug;
@@ -572,6 +643,14 @@ const resolveUniqueProductSlug = async (slug, excludedProductId = null) => {
   ) {
     nextSlug = `${baseSlug}-${suffix}`;
     suffix += 1;
+  }
+
+  if (isDevelopment && nextSlug !== baseSlug) {
+    console.warn("[product] Duplicate slug detected, generated unique fallback", {
+      requestedSlug: baseSlug,
+      resolvedSlug: nextSlug,
+      excludedProductId: excludedProductId ? String(excludedProductId) : null
+    });
   }
 
   return nextSlug;
@@ -613,6 +692,9 @@ export const createProduct = asyncHandler(async (req, res) => {
     const payload = normalizeProductPayload(req.body, { uploadedImages });
     if (uploadedVideo) {
       payload.productVideo = uploadedVideo;
+    }
+    if (!payload.slug) {
+      throw new ApiError(400, "Product slug is required");
     }
     if (!payload.images?.length) {
       throw new ApiError(400, "At least one product image is required");
@@ -658,6 +740,8 @@ export const getAllProducts = asyncHandler(async (req, res) => {
     .skip(skip)
     .limit(limit);
 
+  warnDuplicateProductSlugs(products, "public product list");
+
   res.status(200).json({
     success: true,
     message: "Products fetched successfully",
@@ -684,6 +768,7 @@ export const getAdminProducts = asyncHandler(async (req, res) => {
     .limit(limit);
 
   const serializedProducts = products.map((product) => serializeProduct(product, { baseUrl }));
+  warnDuplicateProductSlugs(products, "admin product list");
 
   const missingMediaCount = serializedProducts.filter(
     (product) => !product.thumbnail && !product.images?.length
@@ -711,13 +796,21 @@ export const getAdminProducts = asyncHandler(async (req, res) => {
 
 export const getProductBySlug = asyncHandler(async (req, res) => {
   const baseUrl = getRequestBaseUrl(req);
+  const normalizedSlug = makeSlug(decodeURIComponent(req.params.slug || ""));
+
   const product = await Product.findOne(
     buildPublicProductFilter({
-      slug: req.params.slug
+      slug: normalizedSlug
     })
   ).populate(productPopulate);
 
   if (!product) {
+    if (isDevelopment) {
+      console.warn("[product] Product detail slug not found", {
+        requestedSlug: req.params.slug,
+        normalizedSlug
+      });
+    }
     throw new ApiError(404, "Product not found");
   }
 
@@ -730,9 +823,10 @@ export const getProductBySlug = asyncHandler(async (req, res) => {
 
 export const getRelatedProducts = asyncHandler(async (req, res) => {
   const baseUrl = getRequestBaseUrl(req);
+  const normalizedSlug = makeSlug(decodeURIComponent(req.params.slug || ""));
   const product = await Product.findOne(
     buildPublicProductFilter({
-      slug: req.params.slug
+      slug: normalizedSlug
     })
   );
 
@@ -763,7 +857,7 @@ export const getRelatedProducts = asyncHandler(async (req, res) => {
         _id: { $ne: product._id },
         status: "active",
         isDeleted: false,
-        $and: [{ $or: publicImageAvailabilityFilter }, { $or: orConditions }]
+        $or: orConditions
       })
         .populate(productPopulate)
         .sort({ isFeatured: -1, createdAt: -1 })
@@ -789,6 +883,15 @@ export const updateProduct = asyncHandler(async (req, res) => {
   const imageAlts = buildImageAltTexts(req.body.imageAlts);
   const imageFiles = getUploadedImageFiles(req);
   const videoFile = getUploadedVideoFile(req);
+  const deletedImages = parseDeletedImages(req.body.deletedImages);
+  const existingImagesAfterDeletion = (existingProduct.images || []).filter(
+    (image) => !imageMatchesDeletedIdentifier(image, deletedImages)
+  );
+  const deletedPublicIds = (existingProduct.images || [])
+    .filter((image) => imageMatchesDeletedIdentifier(image, deletedImages))
+    .map((image) => image.publicId)
+    .filter(Boolean);
+
   const uploadedImages = imageFiles.length
     ? await buildProductImages(
         imageFiles,
@@ -816,8 +919,17 @@ export const updateProduct = asyncHandler(async (req, res) => {
     : null;
 
   try {
+    const shouldUpdateImages = deletedImages.length > 0 || uploadedImages.length > 0;
+    const nextImages = shouldUpdateImages
+      ? [...existingImagesAfterDeletion, ...uploadedImages]
+      : undefined;
+
+    if (shouldUpdateImages && !nextImages.length) {
+      throw new ApiError(400, "At least one product image is required");
+    }
+
     const payload = normalizeProductPayload(req.body, {
-      uploadedImages: uploadedImages.length ? uploadedImages : undefined,
+      uploadedImages: nextImages,
       currentProduct: existingProduct
     });
     if (uploadedVideo) {
@@ -836,8 +948,15 @@ export const updateProduct = asyncHandler(async (req, res) => {
     if (req.body.slug === undefined && req.body.name === undefined && req.body.title === undefined) {
       delete updateData.slug;
     }
+    if (updateData.slug !== undefined && !updateData.slug) {
+      throw new ApiError(400, "Product slug is required");
+    }
 
-    if (!uploadedImages.length && req.body.images === undefined && req.body.galleryImages === undefined) {
+    if (
+      !shouldUpdateImages &&
+      req.body.images === undefined &&
+      req.body.galleryImages === undefined
+    ) {
       delete updateData.images;
       delete updateData.galleryImages;
       if (req.body.featuredImage === undefined && req.body.thumbnail === undefined) {
@@ -862,6 +981,7 @@ export const updateProduct = asyncHandler(async (req, res) => {
     logProductMedia("info", "Updating product media", {
       productId: existingProduct._id.toString(),
       uploadedImageCount: uploadedImages.length,
+      deletedImageCount: deletedPublicIds.length,
       resultingImageCount: updateData.images?.length ?? existingProduct.images?.length ?? 0
     });
 
@@ -874,8 +994,8 @@ export const updateProduct = asyncHandler(async (req, res) => {
       runValidators: true
     });
 
-    if (uploadedImages.length) {
-      await replaceProductAssets(existingProduct, uploadedImages);
+    if (deletedPublicIds.length) {
+      await cloudinaryDelete(deletedPublicIds);
     }
     if (uploadedVideo && existingProduct.productVideo?.publicId) {
       await cloudinaryDelete([existingProduct.productVideo.publicId]);
@@ -908,19 +1028,44 @@ export const replaceProductImages = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Product not found");
   }
 
-  if (!req.files?.length) {
+  const imageFiles = Array.isArray(req.files?.images)
+    ? req.files.images
+    : Array.isArray(req.files)
+      ? req.files
+      : [];
+
+  if (!imageFiles.length) {
     throw new ApiError(400, "At least one product image is required");
   }
 
   const imageAlts = buildImageAltTexts(req.body.imageAlts);
+
   const uploadedImages = await buildProductImages(
-    req.files,
+    imageFiles,
     sanitizeString(existingProduct.title || existingProduct.name || "product-image"),
     imageAlts
   );
+
+  const deletedImages = parseDeletedImages(req.body.deletedImages);
+
+  const existingImagesAfterDeletion = (existingProduct.images || []).filter(
+    (image) => !imageMatchesDeletedIdentifier(image, deletedImages)
+  );
+
+  const deletedPublicIds = (existingProduct.images || [])
+    .filter((image) => imageMatchesDeletedIdentifier(image, deletedImages))
+    .map((image) => image.publicId)
+    .filter(Boolean);
+
+  const nextImages = [...existingImagesAfterDeletion, ...uploadedImages];
+
+  if (!nextImages.length) {
+    throw new ApiError(400, "At least one product image is required");
+  }
+
   const media = normalizeProductMedia(
     {
-      images: uploadedImages
+      images: nextImages
     },
     {
       fallbackAlt: sanitizeString(existingProduct.title || existingProduct.name || "product-image")
@@ -943,7 +1088,9 @@ export const replaceProductImages = asyncHandler(async (req, res) => {
       }
     ).populate(productPopulate);
 
-    await replaceProductAssets(existingProduct, uploadedImages);
+    if (deletedPublicIds.length) {
+      await cloudinaryDelete(deletedPublicIds);
+    }
 
     res.status(200).json({
       success: true,

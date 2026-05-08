@@ -856,6 +856,7 @@ const navCategories: NavCategory[] = useMemo(() => {
                         >
                           <Link
                             href={`/products?category=${activeCat._id}&subCategory=${child._id}`}
+                            
                             onClick={() => setActiveDropdown(null)}
                             className="group flex items-center gap-3 rounded-xl px-4 py-3 text-[13px] font-medium text-stone-600 transition-all duration-150 hover:bg-amber-50/80 hover:text-amber-800"
                           >
