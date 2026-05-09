@@ -285,16 +285,8 @@ const [activeTab, setActiveTab] = useState<ProductTab>("description");
           .then((r) => setRelated(r.data?.slice(0, 4) || []))
           .catch(() => {});
 
-        reviewApi
-          .forProduct(p._id)
-          .then((r) => {
-          
-            setSummary(r.summary || null);
-          })
-          .catch(() => {});
+      
       })
-      .catch((e) => setError(e.message || "Product not found"))
-      .finally(() => setLoading(false));
   }, [slug]);
 
   const images = useMemo(() => {
