@@ -288,7 +288,7 @@ const [activeTab, setActiveTab] = useState<ProductTab>("description");
         reviewApi
           .forProduct(p._id)
           .then((r) => {
-            setReviews(r.data || []);
+          
             setSummary(r.summary || null);
           })
           .catch(() => {});
