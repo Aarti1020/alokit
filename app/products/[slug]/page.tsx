@@ -5,8 +5,8 @@ import { useParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Loader2, AlertCircle } from "lucide-react";
-import { productApi, reviewApi } from "@/lib/api";
-import { Product, Review, ReviewSummary } from "@/types";
+import { productApi } from "@/lib/api";
+import { Product } from "@/types";
 import { useCart } from "@/context/CartContext";
 import ProductCard from "@/components/product/ProductCard";
 
@@ -41,27 +41,6 @@ const getUniqueImages = (imageUrls: string[]) => {
   });
 
   return Array.from(uniqueMap.values());
-};
-
-type ReviewWithUser = Review & {
-  userName?: string;
-  user?: {
-    fullName?: string;
-    name?: string;
-    email?: string;
-  };
-};
-
-const getReviewerName = (review: Review) => {
-  const reviewData = review as ReviewWithUser;
-
-  return (
-    reviewData.userName ||
-    reviewData.user?.fullName ||
-    reviewData.user?.name ||
-    reviewData.user?.email ||
-    "Customer"
-  );
 };
 
 const DESCRIPTION_SECTION_HEADINGS = [
@@ -112,9 +91,18 @@ const stripUnsafeHtml = (html: string) => {
     .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, "")
     .replace(/<iframe[\s\S]*?>[\s\S]*?<\/iframe>/gi, "")
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    .replace(/\s(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi, "")
-    .replace(/<\/?(?!h2\b|h3\b|h4\b|p\b|ul\b|ol\b|li\b|br\b|strong\b|b\b|em\b|i\b)[^>]+>/gi, "")
-    .replace(/<(h2|h3|h4|p|ul|ol|li|br|strong|b|em|i)(?:\s+[^>]*)?>/gi, "<$1>");
+    .replace(
+      /\s(href|src)\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi,
+      ""
+    )
+    .replace(
+      /<\/?(?!h2\b|h3\b|h4\b|p\b|ul\b|ol\b|li\b|br\b|strong\b|b\b|em\b|i\b)[^>]+>/gi,
+      ""
+    )
+    .replace(
+      /<(h2|h3|h4|p|ul|ol|li|br|strong|b|em|i)(?:\s+[^>]*)?>/gi,
+      "<$1>"
+    );
 };
 
 const looksLikeHtml = (value: string) => /<\/?[a-z][\s\S]*>/i.test(value);
@@ -141,9 +129,9 @@ const splitDescriptionItems = (content: string) => {
 
   if (bulletParts.length > 1) return bulletParts;
 
-  const starterPattern = DESCRIPTION_ITEM_STARTERS
-    .map((starter) => starter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("|");
+  const starterPattern = DESCRIPTION_ITEM_STARTERS.map((starter) =>
+    starter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  ).join("|");
 
   return cleaned
     .split(new RegExp(`\\s+(?=${starterPattern}\\b)`, "g"))
@@ -156,25 +144,24 @@ const plainTextDescriptionToHtml = (description: string) => {
 
   if (!raw) return "<p>No description available.</p>";
 
-  const headingMatches = DESCRIPTION_SECTION_HEADINGS
-    .map((heading) => {
-      const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const match = raw.match(new RegExp(`\\b${escapedHeading}\\b`, "i"));
+  const headingMatches = DESCRIPTION_SECTION_HEADINGS.map((heading) => {
+    const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = raw.match(new RegExp(`\\b${escapedHeading}\\b`, "i"));
 
-      return match?.index !== undefined
-        ? {
-            heading,
-            index: match.index,
-            length: match[0].length,
-          }
-        : null;
-    })
+    return match?.index !== undefined
+      ? {
+          heading,
+          index: match.index,
+          length: match[0].length,
+        }
+      : null;
+  })
     .filter(Boolean)
     .sort((a, b) => a!.index - b!.index) as Array<{
-      heading: string;
-      index: number;
-      length: number;
-    }>;
+    heading: string;
+    index: number;
+    length: number;
+  }>;
 
   if (!headingMatches.length) {
     return `<p>${escapeHtml(raw)}</p>`;
@@ -247,14 +234,20 @@ function ProductDescription({ description }: { description?: string }) {
   );
 }
 
+type ProductTab = "description" | "short-description" | "specs";
+
+const productTabs: Array<{ key: ProductTab; label: string }> = [
+  { key: "description", label: "Description" },
+  { key: "short-description", label: "Short Description" },
+  { key: "specs", label: "Specifications" },
+];
+
 export default function ProductDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const { addToCart } = useCart();
 
   const [product, setProduct] = useState<Product | null>(null);
   const [related, setRelated] = useState<Product[]>([]);
-
-  const [summary, setSummary] = useState<ReviewSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeImage, setActiveImage] = useState(0);
@@ -262,9 +255,7 @@ export default function ProductDetailPage() {
   const [selectedVariant, setSelectedVariant] = useState<
     { label: string; value: string } | undefined
   >();
- type ProductTab = "description" | "short-description" | "specs";
-
-const [activeTab, setActiveTab] = useState<ProductTab>("description");
+  const [activeTab, setActiveTab] = useState<ProductTab>("description");
 
   useEffect(() => {
     if (!slug) return;
@@ -284,9 +275,9 @@ const [activeTab, setActiveTab] = useState<ProductTab>("description");
           .related(slug)
           .then((r) => setRelated(r.data?.slice(0, 4) || []))
           .catch(() => {});
-
-      
       })
+      .catch((e) => setError(e.message || "Product not found"))
+      .finally(() => setLoading(false));
   }, [slug]);
 
   const images = useMemo(() => {
@@ -356,16 +347,12 @@ const [activeTab, setActiveTab] = useState<ProductTab>("description");
     product.effectivePrice ??
     (product.salePrice > 0 ? product.salePrice : product.basePrice);
 
+  const specs = product.specifications as Record<string, string> | undefined;
+
   const handleAddToCart = async () => {
     await addToCart(product._id, qty, selectedVariant);
   };
 
-  const specs = product.specifications as Record<string, string> | undefined;
-const productTabs: Array<{ key: ProductTab; label: string }> = [
-  { key: "description", label: "Description" },
-  { key: "short-description", label: "Short Description" },
-  { key: "specs", label: "Specifications" },
-];
   return (
     <div className="min-h-screen bg-stone-50">
       {/* Breadcrumb */}
@@ -594,62 +581,61 @@ const productTabs: Array<{ key: ProductTab; label: string }> = [
         </div>
 
         {/* Tabs */}
-              {/* Tabs */}
-<div className="mb-10 sm:mb-12">
- <div className="mb-5 flex gap-0.5 overflow-x-auto border-b border-amber-100 scrollbar-hide sm:mb-6">
-  {productTabs.map((tab) => (
-    <button
-      key={tab.key}
-      type="button"
-      onClick={() => setActiveTab(tab.key)}
-      className={`shrink-0 border-b-2 px-4 py-3 font-jost text-sm font-medium transition-colors ${
-        activeTab === tab.key
-          ? "border-amber-800 text-amber-800"
-          : "border-transparent text-stone-500 hover:text-amber-700"
-      }`}
-    >
-      {tab.label}
-    </button>
-  ))}
-</div>
-{activeTab === "description" && (
-  <div className="rounded-2xl border border-stone-200 bg-white p-5 sm:p-7">
-    <ProductDescription description={product.description} />
-  </div>
-)}
-
-{activeTab === "short-description" && (
-  <div className="rounded-2xl border border-stone-200 bg-white p-5 sm:p-7">
-    <ProductDescription description={product.shortDescription} />
-  </div>
-)}
-
-{activeTab === "specs" && (
-  <div className="rounded-2xl border border-stone-200 bg-white p-5 font-jost text-sm text-stone-600 sm:p-7">
-    {specs && Object.keys(specs).length > 0 ? (
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {Object.entries(specs).map(([key, value]) => (
-          <div
-            key={key}
-            className="flex justify-between gap-4 border-b border-stone-100 py-3"
-          >
-            <span className="font-medium capitalize text-stone-800">
-              {key.replace(/([A-Z])/g, " $1").replace(/_/g, " ")}
-            </span>
-
-            <span className="text-right text-stone-600">
-              {String(value || "-")}
-            </span>
+        <div className="mb-10 sm:mb-12">
+          <div className="mb-5 flex gap-0.5 overflow-x-auto border-b border-amber-100 scrollbar-hide sm:mb-6">
+            {productTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`shrink-0 border-b-2 px-4 py-3 font-jost text-sm font-medium transition-colors ${
+                  activeTab === tab.key
+                    ? "border-amber-800 text-amber-800"
+                    : "border-transparent text-stone-500 hover:text-amber-700"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-        ))}
-      </div>
-    ) : (
-      <p className="text-stone-400">No specifications available.</p>
-    )}
-  </div>
-)}
 
-</div>
+          {activeTab === "description" && (
+            <div className="rounded-2xl border border-stone-200 bg-white p-5 sm:p-7">
+              <ProductDescription description={product.description} />
+            </div>
+          )}
+
+          {activeTab === "short-description" && (
+            <div className="rounded-2xl border border-stone-200 bg-white p-5 sm:p-7">
+              <ProductDescription description={product.shortDescription} />
+            </div>
+          )}
+
+          {activeTab === "specs" && (
+            <div className="rounded-2xl border border-stone-200 bg-white p-5 font-jost text-sm text-stone-600 sm:p-7">
+              {specs && Object.keys(specs).length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {Object.entries(specs).map(([key, value]) => (
+                    <div
+                      key={key}
+                      className="flex justify-between gap-4 border-b border-stone-100 py-3"
+                    >
+                      <span className="font-medium capitalize text-stone-800">
+                        {key.replace(/([A-Z])/g, " $1").replace(/_/g, " ")}
+                      </span>
+
+                      <span className="text-right text-stone-600">
+                        {String(value || "-")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-stone-400">No specifications available.</p>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Related Products */}
         {related.length > 0 && (
