@@ -253,7 +253,7 @@ export default function ProductDetailPage() {
 
   const [product, setProduct] = useState<Product | null>(null);
   const [related, setRelated] = useState<Product[]>([]);
-  // const [reviews, setReviews] = useState<Review[]>([]);
+
   const [summary, setSummary] = useState<ReviewSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -657,43 +657,6 @@ const productTabs: Array<{ key: ProductTab; label: string }> = [
   </div>
 )}
 
-  {/* {activeTab === "reviews" && (
-    <div className="rounded-2xl border border-stone-200 bg-white p-5 font-jost text-sm text-stone-600 sm:p-7">
-      {summary && (
-        <div className="mb-5 rounded-xl border border-stone-100 bg-white p-4">
-          <p className="font-medium text-stone-800">
-            Average Rating: {summary.averageRating || 0}
-          </p>
-          <p className="text-stone-500">
-            Total Reviews: {summary.totalReviews || reviews.length}
-          </p>
-        </div>
-      )}
-
-      {reviews.length > 0 ? (
-        <div className="space-y-4">
-          {reviews.map((review) => (
-            <div
-              key={review._id}
-              className="rounded-xl border border-stone-100 bg-white p-4"
-            >
-              <p className="font-medium text-stone-800">
-                {getReviewerName(review)}
-              </p>
-
-              <p className="mt-1 text-amber-700">
-                {"★".repeat(review.rating)}
-              </p>
-
-              <p className="mt-2 text-stone-600">{review.comment}</p>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="text-stone-400">No reviews yet.</p>
-      )}
-    </div>
-  )} */}
 </div>
 
         {/* Related Products */}
